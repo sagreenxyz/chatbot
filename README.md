@@ -5,11 +5,11 @@ A simple, customizable web-based AI chatbot built with Node.js, inspired by the 
 ## Features
 
 *   **Modular Design:** Easily swap components like storage and logic adapters.
-*   **Learning:** Learns responses based on conversation flow.
+*   **Learning:** Learns responses based on conversation flow and user corrections.
 *   **Preprocessors:** Includes basic text preprocessing (lowercase, whitespace cleaning).
 *   **Simple Storage:** Uses a JSON file for storing conversation data (`db.json`).
-*   **Web Interface:** Basic HTML interface for interaction.
-*   **API Endpoint:** `/chat` endpoint for programmatic interaction.
+*   **Web Interface:** Basic HTML interface for interaction, including response correction.
+*   **API Endpoints:** `/chat` for getting responses, `/correct` for submitting corrections.
 
 ## Setup
 
@@ -45,34 +45,43 @@ A simple, customizable web-based AI chatbot built with Node.js, inspired by the 
 
 1.  Run the chatbot using `npm start` or `npm run restart`.
 2.  Open your web browser to `http://localhost:3001` (or the configured port).
-3.  Interact with the bot through the input field. The bot learns by associating consecutive statements. For example:
-    *   You: Hello
-    *   Bot: I'm sorry, I don't understand.
-    *   You: How are you?
-    *   Bot: I'm sorry, I don't understand. *(Learns "How are you?" follows "Hello")*
-    *   You: Hello
-    *   Bot: How are you? *(Responds with learned statement)*
+3.  Interact with the bot through the input field.
+4.  **Correcting Responses:** If the bot gives an unsatisfactory answer, click the "Correct This Response" button that appears next to it. Enter the response you think the bot *should* have given and click "Submit Correction". The bot will learn this new association for future interactions.
 
 ## API Interaction
 
-Send a POST request to `/chat` with a JSON body:
+*   **Get Response:** Send a POST request to `/chat` with a JSON body:
+    ```json
+    {
+      "text": "Your message here"
+    }
+    ```
+    The response includes the original input and the bot's reply:
+    ```json
+    {
+      "original_input": "Your message here",
+      "response": {
+        "text": "Bot's response text",
+        "confidence": 0.9
+      }
+    }
+    ```
 
-```json
-{
-  "text": "Your message here"
-}
-```
-
-The response will be JSON containing the bot's reply:
-
-```json
-{
-  "response": {
-    "text": "Bot's response text",
-    "confidence": 0.9
-  }
-}
-```
+*   **Submit Correction:** Send a POST request to `/correct` with a JSON body:
+    ```json
+    {
+      "originalInputText": "The user input that got the wrong answer",
+      "incorrectResponseText": "The bot's actual wrong answer (optional for server)",
+      "correctResponseText": "The answer the bot should have given"
+    }
+    ```
+    The response indicates success:
+    ```json
+    {
+      "success": true,
+      "message": "Correction learned."
+    }
+    ```
 
 ## Architecture Overview
 

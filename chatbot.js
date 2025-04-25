@@ -111,6 +111,10 @@ class ChatBot {
              responseStatement.confidence = bestMatch.confidence;
              // Link response to the input statement's text
              responseStatement.in_response_to = inputStatement.text;
+
+             // Learn the association between the input and the bot's *selected* response
+             // This helps reinforce successful response selections
+             await this.learnResponse(responseStatement, inputStatement);
         } else {
             // Return a default Statement object
             responseStatement = new Statement({
@@ -131,6 +135,12 @@ class ChatBot {
      * @param {Statement} previousStatement - The previous statement received (already preprocessed).
      */
     async learnResponse(statement, previousStatement) {
+        // Ensure we have valid text to learn
+        if (!statement || !statement.text || !previousStatement || !previousStatement.text) {
+            console.warn("Attempted to learn response with invalid statement data.");
+            return;
+        }
+
         // Create a Statement object representing the relationship to store
         // Ensure we are linking the actual text values
         const statementToLearn = new Statement({
@@ -145,6 +155,38 @@ class ChatBot {
         } catch (error) {
              console.error("Error during storage update in learnResponse:", error);
         }
+    }
+
+    /**
+     * Learns a user-provided correction.
+     * Associates the correctResponseText with the originalInputText.
+     * @param {string} originalInputText - The user's input that received a wrong answer.
+     * @param {string} correctResponseText - The correct answer provided by the user.
+     */
+    async learnCorrection(originalInputText, correctResponseText) {
+        // Create Statement objects for processing
+        let originalInputStatement = new Statement(originalInputText);
+        let correctResponseStatement = new Statement(correctResponseText);
+
+        // Preprocess both
+        originalInputStatement = this.preprocess(originalInputStatement);
+        correctResponseStatement = this.preprocess(correctResponseStatement);
+
+        // Create the statement representing the correct association
+        const correctedStatementToLearn = new Statement({
+            text: correctResponseStatement.text, // The correct response text
+            in_response_to: originalInputStatement.text // Linked to the original input text
+        });
+
+        // Use the storage adapter's update method.
+        // The update method should handle overwriting/updating the 'in_response_to'
+        // field if a statement with the same 'text' already exists.
+        console.log(`Learning correction: "${correctedStatementToLearn.text}" in response to "${correctedStatementToLearn.in_response_to}"`);
+        await this.storage.update(correctedStatementToLearn);
+
+        // Optional: Consider logic to find and potentially remove or down-weight
+        // the statement representing the *incorrect* response association,
+        // but simply overwriting the correct one via update() is often sufficient.
     }
 }
 

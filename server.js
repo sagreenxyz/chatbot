@@ -39,6 +39,7 @@ app.post('/chat', async (req, res) => {
 
         // Return the text and confidence from the response Statement
         res.json({
+            original_input: inputText,
             response: {
                 text: responseStatement.text,
                 confidence: responseStatement.confidence
@@ -53,27 +54,76 @@ app.post('/chat', async (req, res) => {
     }
 });
 
-// --- Simple Web UI (Optional) ---
-// The existing web UI should still work, as it expects a response object
-// with a 'text' property within the 'response' field.
+// --- New Endpoint for Corrections ---
+app.post('/correct', async (req, res) => {
+    const { originalInputText, incorrectResponseText, correctResponseText } = req.body;
+
+    if (!originalInputText || !correctResponseText) {
+         return res.status(400).json({ error: 'Missing originalInputText or correctResponseText in request body' });
+    }
+
+    try {
+        // Call a new method on the bot to learn the correction
+        await bot.learnCorrection(originalInputText, correctResponseText);
+        res.json({ success: true, message: 'Correction learned.' });
+    } catch (error) {
+        console.error("Error processing correction:", error);
+        res.status(500).json({ error: 'Internal server error', details: error.message });
+    }
+});
+
+// --- Simple Web UI (Updated) ---
 app.get('/', (req, res) => {
     res.send(`
         <h1>Node.js ChatBot</h1>
+        <div id="conversation">
+             <div id="last-interaction">
+                <p><strong>You:</strong> <span id="last-input">...</span></p>
+                <p><strong>Bot:</strong> <span id="last-response">...</span> (<span id="last-confidence">...</span>)
+                   <button id="correct-btn" style="display:none;">Correct This Response</button>
+                </p>
+             </div>
+             <div id="correction-form" style="display:none;">
+                 <label for="correct-text">Enter correct response:</label>
+                 <input type="text" id="correct-text" size="50">
+                 <button id="submit-correction-btn">Submit Correction</button>
+                 <button id="cancel-correction-btn">Cancel</button>
+             </div>
+             <div id="response-status"></div> <!-- For status messages -->
+        </div>
         <form id="chat-form">
             <input type="text" id="message" placeholder="Type your message..." required>
             <button type="submit">Send</button>
         </form>
-        <div id="response"></div>
-        <script>
-            const form = document.getElementById('chat-form');
-            const messageInput = document.getElementById('message');
-            const responseDiv = document.getElementById('response');
 
-            form.addEventListener('submit', async (e) => {
+        <script>
+            const chatForm = document.getElementById('chat-form');
+            const messageInput = document.getElementById('message');
+            const lastInputSpan = document.getElementById('last-input');
+            const lastResponseSpan = document.getElementById('last-response');
+            const lastConfidenceSpan = document.getElementById('last-confidence');
+            const correctBtn = document.getElementById('correct-btn');
+            const correctionForm = document.getElementById('correction-form');
+            const correctTextInput = document.getElementById('correct-text');
+            const submitCorrectionBtn = document.getElementById('submit-correction-btn');
+            const cancelCorrectionBtn = document.getElementById('cancel-correction-btn');
+            const responseStatusDiv = document.getElementById('response-status');
+
+            let currentInputText = ''; // Store the input that led to the current response
+            let currentResponseText = ''; // Store the bot's current response text
+
+            chatForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
                 const text = messageInput.value;
                 messageInput.value = '';
-                responseDiv.textContent = 'Thinking...';
+                responseStatusDiv.textContent = 'Thinking...';
+                lastInputSpan.textContent = text; // Show user input immediately
+                lastResponseSpan.textContent = '...';
+                lastConfidenceSpan.textContent = '...';
+                correctBtn.style.display = 'none'; // Hide button until response arrives
+                correctionForm.style.display = 'none'; // Hide correction form
+
+                currentInputText = text; // Store for potential correction
 
                 try {
                     const response = await fetch('/chat', {
@@ -82,14 +132,73 @@ app.get('/', (req, res) => {
                         body: JSON.stringify({ text })
                     });
                     const data = await response.json();
-                    if (response.ok && data.response) { // Check if data.response exists
-                        // Display text and optionally confidence
-                        responseDiv.textContent = \`Bot: \${data.response.text} (Confidence: \${data.response.confidence?.toFixed(2) || 'N/A'})\`;
+
+                    if (response.ok && data.response) {
+                        currentResponseText = data.response.text; // Store for potential correction
+                        lastResponseSpan.textContent = data.response.text;
+                        lastConfidenceSpan.textContent = \`Confidence: \${data.response.confidence?.toFixed(2) || 'N/A'}\`;
+                        responseStatusDiv.textContent = ''; // Clear thinking message
+                        correctBtn.style.display = 'inline-block'; // Show correction button
                     } else {
-                        responseDiv.textContent = 'Error: ' + (data.error || data.message || 'Unknown error');
+                        lastResponseSpan.textContent = 'Error';
+                        lastConfidenceSpan.textContent = 'N/A';
+                        responseStatusDiv.textContent = 'Error: ' + (data.error || data.message || 'Unknown error');
+                        correctBtn.style.display = 'none';
                     }
                 } catch (err) {
-                    responseDiv.textContent = 'Network Error: ' + err.message;
+                    lastResponseSpan.textContent = 'Network Error';
+                    lastConfidenceSpan.textContent = 'N/A';
+                    responseStatusDiv.textContent = 'Network Error: ' + err.message;
+                    correctBtn.style.display = 'none';
+                }
+            });
+
+            correctBtn.addEventListener('click', () => {
+                correctionForm.style.display = 'block';
+                correctTextInput.value = currentResponseText; // Pre-fill with bot's response
+                correctTextInput.focus();
+                correctBtn.style.display = 'none'; // Hide button while correcting
+            });
+
+            cancelCorrectionBtn.addEventListener('click', () => {
+                correctionForm.style.display = 'none';
+                correctBtn.style.display = 'inline-block'; // Show button again
+            });
+
+            submitCorrectionBtn.addEventListener('click', async () => {
+                const correctedText = correctTextInput.value.trim();
+                if (!correctedText) {
+                    responseStatusDiv.textContent = 'Please enter a corrected response.';
+                    return;
+                }
+
+                responseStatusDiv.textContent = 'Submitting correction...';
+
+                try {
+                    const response = await fetch('/correct', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            originalInputText: currentInputText,
+                            incorrectResponseText: currentResponseText, // Send incorrect one too (optional for server)
+                            correctResponseText: correctedText
+                        })
+                    });
+                    const data = await response.json();
+
+                    if (response.ok && data.success) {
+                        responseStatusDiv.textContent = 'Correction submitted successfully!';
+                        // Optionally update the displayed response immediately
+                        // lastResponseSpan.textContent = correctedText;
+                    } else {
+                         responseStatusDiv.textContent = 'Error submitting correction: ' + (data.error || data.message || 'Unknown error');
+                    }
+                } catch (err) {
+                     responseStatusDiv.textContent = 'Network error during correction: ' + err.message;
+                } finally {
+                    correctionForm.style.display = 'none';
+                    // Decide whether to show the correct button again immediately or not
+                    // correctBtn.style.display = 'inline-block';
                 }
             });
         </script>
