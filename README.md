@@ -5,11 +5,11 @@ A simple, customizable web-based AI chatbot built with Node.js, inspired by the 
 ## Features
 
 *   **Modular Design:** Easily swap components like storage and logic adapters.
-*   **Intent-Based Understanding:** Attempts to classify user input intent (e.g., greeting, goodbye, ask_time) for more robust responses.
+*   **NLP Integration:** Uses **Nlp.js** for improved intent classification and entity recognition.
 *   **Specific Logic:** Handles specific intents like asking the time with dedicated logic adapters.
-*   **Learning:** Learns responses associated with intents, conversation flow, and user corrections.
+*   **Learning:** Learns responses associated with intents, conversation flow, and user corrections. The NLP model is trained on startup.
 *   **Preprocessors:** Includes basic text preprocessing (lowercase, whitespace cleaning).
-*   **Simple Storage:** Uses a JSON file for storing conversation data (`db.json`), including intents.
+*   **Simple Storage:** Uses a JSON file for storing conversation data (`db.json`).
 *   **Web Interface:** Basic HTML interface for interaction, including response correction.
 *   **API Endpoints:** `/chat` for getting responses, `/correct` for submitting corrections.
 
@@ -21,6 +21,7 @@ A simple, customizable web-based AI chatbot built with Node.js, inspired by the 
     ```bash
     npm install
     ```
+    *(This will install Express and @nlpjs/basic)*
 
 ## Running the Chatbot
 
@@ -28,7 +29,7 @@ A simple, customizable web-based AI chatbot built with Node.js, inspired by the 
     ```bash
     npm start
     ```
-    The bot will typically run on `http://localhost:3001` (or the port specified in `server.js` or by the `PORT` environment variable).
+    The first time you run this, it will train the NLP model (`model.nlp`), which might take a few seconds. Subsequent starts will load the saved model. The bot runs on `http://localhost:3001`.
 
 *   **Restart (Kill existing process on port 3001 and start):**
     ```bash
@@ -87,35 +88,38 @@ A simple, customizable web-based AI chatbot built with Node.js, inspired by the 
 
 ## Architecture Overview
 
-*   **`server.js`**: Entry point, sets up Express server and API endpoints.
-*   **`chatbot.js`**: Core `ChatBot` class orchestrating adapters, intent classification, and learning.
-*   **`statement.js`**: `Statement` class representing conversational entries (now includes `intent`).
+*   **`server.js`**: Entry point, sets up Express server, initializes the bot (including NLP), and defines API endpoints.
+*   **`chatbot.js`**: Core `ChatBot` class orchestrating adapters, NLP processing, and learning.
+*   **`statement.js`**: `Statement` class representing conversational entries (includes `intent`, `entities`, `nlp_score`).
 *   **`preprocessors.js`**: Functions to clean/modify input text.
-*   **`intent_classifier.js`**: Simple keyword-based component to determine user input intent.
+*   **`nlp_manager.js`**: Manages the Nlp.js instance, including training, loading, and processing text.
 *   **`adapters/`**: Contains base classes and implementations for:
-    *   **`storage_adapter.js`**: Interface for storing/retrieving statements (handles `intent`).
+    *   **`storage_adapter.js`**: Interface for storing/retrieving statements.
         *   `json_file_storage_adapter.js`: Stores data in `db.json`.
     *   **`logic_adapter.js`**: Interface for selecting responses.
         *   `time_logic_adapter.js`: Specifically handles requests for the current time.
-        *   `best_match_logic_adapter.js`: Finds responses primarily based on matching the detected intent (fallback).
+        *   `best_match_logic_adapter.js`: Finds responses primarily based on matching the detected intent.
 *   **`db.json`**: Default database file (created automatically).
+*   **`model.nlp`**: Saved trained NLP model (created automatically, ignored by git).
 
 ## Customization
 
-*   **Intents:** Modify `intent_classifier.js` to add/change intents and keywords, or replace it with a more sophisticated classifier (e.g., using NLP libraries). Configure a custom classifier via `ChatBot` options in `server.js`.
-*   **Logic:** Create new classes inheriting from `LogicAdapter` (potentially using intent information) and add them to the `logicAdapters` array in `server.js`.
-*   **Storage:** Create new classes inheriting from `StorageAdapter` and set it as the `storageAdapter` in `server.js`.
+*   **Intents & Training:** Modify the training data (documents, answers) within `nlp_manager.js` to add/change intents, entities, or improve recognition.
+*   **NLP Configuration:** Adjust Nlp.js settings in `nlp_manager.js`.
+*   **Logic:** Create new `LogicAdapter` classes (potentially using intent and entities) and add them to the `logicAdapters` array in `server.js`.
+*   **Storage:** Create new `StorageAdapter` classes and set it as the `storageAdapter` in `server.js`.
 *   **Preprocessors:** Add new functions to `preprocessors.js` and include them in the `preprocessors` array in `server.js`.
-*   **Response Selection:** Modify or add methods in `BestMatchLogicAdapter` (or your custom logic adapter) to change how responses are chosen when multiple responses exist for an intent.
+*   **Response Selection:** Modify `BestMatchLogicAdapter` or custom adapters.
 
 ## Future Improvements
 
-*   **Advanced NLP:** Integrate more sophisticated NLP libraries (e.g., Natural, Nlp.js) for better intent classification, entity recognition, and sentiment analysis.
-*   **Context Management:** Implement a more robust way to track conversation context across multiple turns.
-*   **More Logic Adapters:** Add adapters for specific tasks like calculations, weather lookups, or integrating with external APIs.
-*   **Database Storage:** Create storage adapters for databases like MongoDB, PostgreSQL, or Redis for better scalability and performance.
-*   **Confidence Scoring:** Implement more nuanced confidence calculation in logic adapters based on match quality, context, etc.
-*   **Testing:** Add unit and integration tests for adapters, preprocessors, and the core chatbot logic.
-*   **User Authentication/Profiles:** Allow different users to have separate conversation histories.
-*   **Deployment:** Add instructions and configurations for deploying to platforms like Heroku, AWS, or Docker.
-*   **Training Interface:** Build a separate interface or process for training the bot with predefined conversation corpora.
+*   **Context Management:** Implement a more robust way to track conversation context across multiple turns, potentially using NLP entities.
+*   **Entity-Driven Logic:** Create logic adapters that react specifically to recognized entities (e.g., locations, names, dates).
+*   **Sentiment Analysis:** Use NLP.js sentiment results to tailor responses.
+*   **More Logic Adapters:** Add adapters for calculations, weather, external APIs, etc.
+*   **Database Storage:** Create storage adapters for databases (MongoDB, PostgreSQL, Redis).
+*   **Confidence Scoring:** Refine confidence calculation using NLP scores and adapter logic.
+*   **Testing:** Add unit/integration tests.
+*   **User Authentication/Profiles:** Allow separate conversation histories.
+*   **Deployment:** Add deployment instructions (Heroku, AWS, Docker).
+*   **Training Interface:** Build a separate interface for training.

@@ -29,6 +29,14 @@ const bot = new ChatBot('NodeBot', {
 });
 
 // --- API Endpoint ---
+// Add a check for bot readiness
+app.use(async (req, res, next) => {
+    if (!bot.nlpReady && req.path === '/chat') { // Only block chat if NLP not ready
+        return res.status(503).json({ error: "Bot is still initializing, please try again shortly." });
+    }
+    next();
+});
+
 app.post('/chat', async (req, res) => {
     const inputText = req.body.text;
 
@@ -142,6 +150,11 @@ app.get('/', (req, res) => {
                         lastConfidenceSpan.textContent = \`Confidence: \${data.response.confidence?.toFixed(2) || 'N/A'}\`;
                         responseStatusDiv.textContent = ''; // Clear thinking message
                         correctBtn.style.display = 'inline-block'; // Show correction button
+                    } else if (response.status === 503) { // Handle initializing state
+                         lastResponseSpan.textContent = '';
+                         lastConfidenceSpan.textContent = '';
+                         responseStatusDiv.textContent = data.error || 'Bot is initializing...';
+                         correctBtn.style.display = 'none';
                     } else {
                         lastResponseSpan.textContent = 'Error';
                         lastConfidenceSpan.textContent = 'N/A';
@@ -208,7 +221,19 @@ app.get('/', (req, res) => {
     `);
 });
 
+// --- Start Server ---
+// Wrap startup in an async function to initialize bot first
+async function startServer() {
+    console.log("Initializing Bot...");
+    await bot.initialize(); // Wait for NLP model to be ready
+    console.log("Bot initialized.");
 
-app.listen(port, () => {
-    console.log(`Chatbot server listening at http://localhost:${port}`);
+    app.listen(port, () => {
+        console.log(`Chatbot server listening at http://localhost:${port}`);
+    });
+}
+
+startServer().catch(err => {
+    console.error("Failed to start server:", err);
+    process.exit(1);
 });

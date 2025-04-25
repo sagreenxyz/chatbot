@@ -9,6 +9,9 @@ yarn.lock
 # Database file
 db.json
 
+# NLP Model
+model.nlp
+
 # Environment variables
 .env*
 

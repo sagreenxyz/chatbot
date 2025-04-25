@@ -4,6 +4,7 @@ class Statement {
         if (typeof config === 'string') {
             this.text = config;
             this.intent = null; // Initialize intent
+            this.entities = []; // Initialize entities
             // Initialize defaults for other properties when created from string
             this.in_response_to = null;
             this.conversation = 'default';
@@ -18,6 +19,7 @@ class Statement {
             this.storage_data = config.storage_data || {}; // Extra data for storage adapter
             this.timestamp = config.timestamp || Date.now();
             this.intent = config.intent || null; // Add intent property
+            this.entities = config.entities || []; // Add entities property
         } else {
              throw new Error("Invalid Statement configuration");
         }
@@ -30,7 +32,8 @@ class Statement {
             in_response_to: this.in_response_to,
             conversation: this.conversation,
             timestamp: this.timestamp,
-            intent: this.intent // Include intent in serialized data
+            intent: this.intent, // Include intent in serialized data
+            entities: this.entities // Include entities
             // Note: Confidence is usually calculated, not stored directly this way
             // storage_data could be merged here if needed
         };

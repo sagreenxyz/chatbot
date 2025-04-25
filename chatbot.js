@@ -1,37 +1,39 @@
-const Statement = require('./statement'); // Import Statement class
-const preprocessors = require('./preprocessors'); // Import preprocessors
-const { classifyIntent, DEFAULT_INTENT } = require('./intent_classifier'); // Import classifier
-
-// Default adapter imports (assuming they exist and are updated)
+const Statement = require('./statement');
+const preprocessors = require('./preprocessors');
+// const { classifyIntent, DEFAULT_INTENT } = require('./intent_classifier'); // Remove simple classifier
+const nlpProcessor = require('./nlp_manager'); // Import the NLP manager instance
 const JsonFileStorageAdapter = require('./adapters/json_file_storage_adapter');
 const BestMatchLogicAdapter = require('./adapters/best_match_logic_adapter');
 
 class ChatBot {
     constructor(name, options = {}) {
         this.name = name;
-
-        // Use provided adapters or defaults
         this.storage = options.storageAdapter || new JsonFileStorageAdapter();
         this.logicAdapters = options.logicAdapters || [new BestMatchLogicAdapter()];
-
-        // Add preprocessors (defaulting to lowercase and whitespace cleaning)
         this.preprocessors = options.preprocessors || [
             preprocessors.cleanWhitespace,
-            preprocessors.lowercase // Apply lowercase *after* cleaning whitespace
+            preprocessors.lowercase // Keep lowercase for NLP processing
         ];
-
-        // Store the previous statement received (now as a Statement object)
         this.previous_statement = null;
 
-        // Add intent classifier (could be made configurable like adapters)
-        this.intentClassifier = options.intentClassifier || classifyIntent;
+        // NLP Manager is now managed externally via nlp_manager.js
+        // We just use the imported instance 'nlpProcessor'
+        this.nlpReady = false; // Flag to track NLP readiness
     }
 
-    /**
-     * Apply all preprocessors to the statement.
-     * @param {Statement} statement - The statement to preprocess.
-     * @returns {Statement} - The processed statement.
-     */
+    // Add an async initialization method
+    async initialize() {
+        if (!nlpProcessor.isReady) {
+            // Try loading first, setup if loading fails (handled within nlpProcessor.load)
+            await nlpProcessor.load();
+        }
+        this.nlpReady = nlpProcessor.isReady;
+        if (!this.nlpReady) {
+             console.error("FATAL: NLP Processor failed to initialize.");
+             // Handle failure appropriately - maybe throw an error or exit
+        }
+    }
+
     preprocess(statement) {
         let currentStatement = statement;
         // Ensure text exists before processing
@@ -45,78 +47,83 @@ class ChatBot {
         return currentStatement;
     }
 
-    /**
-     * Takes an input string or Statement object, processes it, learns, and returns a response Statement.
-     * @param {string|Statement} inputData - The input text or Statement object.
-     * @returns {Promise<Statement>} - A promise that resolves with the response Statement.
-     */
     async getResponse(inputData) {
-        // Ensure input is a Statement object
-        let inputStatement = (inputData instanceof Statement) ? inputData : new Statement(inputData);
-
-        // Preprocess the input statement
-        inputStatement = this.preprocess(inputStatement);
-
-        // Classify Intent
-        inputStatement.intent = this.intentClassifier(inputStatement);
-        console.log(`Detected intent: ${inputStatement.intent}`); // Logging
-
-        // Learn that the *current input* might follow the *previous input*.
-        if (this.previous_statement) {
-            await this.learnInputSequence(inputStatement, this.previous_statement);
+        if (!this.nlpReady) {
+             return new Statement({ text: "I'm still starting up, please wait a moment.", confidence: 0 });
         }
 
+        let inputStatement = (inputData instanceof Statement) ? inputData : new Statement(inputData);
+
+        // 1. Preprocess
+        inputStatement = this.preprocess(inputStatement);
+
+        // 2. Classify Intent & Entities using NLP Manager
+        const nlpResult = await nlpProcessor.process(inputStatement.text);
+        inputStatement.intent = nlpResult.intent;
+        inputStatement.entities = nlpResult.entities;
+        inputStatement.nlp_score = nlpResult.score; // Store NLP confidence
+        console.log(`NLP Result: Intent=${inputStatement.intent}, Score=${inputStatement.nlp_score.toFixed(2)}, Entities=`, inputStatement.entities);
+
+        // --- Learning based on previous interaction (Input Sequence) ---
+        if (this.previous_statement) {
+             await this.learnInputSequence(inputStatement, this.previous_statement);
+        }
+        // --- End Input Sequence Learning ---
+
+        // 3. Find Response using Logic Adapters
         let bestMatch = null;
         let maxConfidence = -1;
-
-        // Find the best response using logic adapters
         for (const adapter of this.logicAdapters) {
-            // Logic adapters now receive and process Statement objects
             if (adapter.canProcess(inputStatement)) {
-                try {
-                    const result = await adapter.process(inputStatement, this.storage);
-                    if (result && result.response instanceof Statement && typeof result.confidence === 'number') {
-                        if (result.confidence > maxConfidence) {
-                            maxConfidence = result.confidence;
-                            bestMatch = result;
-                        }
-                    } else {
-                        console.warn(`Logic adapter ${adapter.constructor.name} returned invalid result for input:`, inputStatement.text, "Result:", result);
-                    }
-                } catch (error) {
-                    console.error(`Error processing with logic adapter ${adapter.constructor.name}:`, error);
+                const result = await adapter.process(inputStatement, this.storage);
+                // Logic adapters might now use entities as well
+                // Confidence should reflect adapter's certainty + potentially NLP score
+                let combinedConfidence = result.confidence; // Start with adapter's confidence
+                // Optional: Factor in NLP score (e.g., lower confidence if NLP score is low)
+                // if (inputStatement.nlp_score < 0.5) { combinedConfidence *= inputStatement.nlp_score; }
+
+                if (combinedConfidence > maxConfidence) {
+                    maxConfidence = combinedConfidence;
+                    bestMatch = result; // result = { response: Statement, confidence: number }
                 }
             }
         }
 
-        // Select the response or return a default
+        // 4. Select Response or Default
         let responseStatement;
-        if (bestMatch && bestMatch.response && maxConfidence > 0) {
-            responseStatement = bestMatch.response;
-            responseStatement.confidence = maxConfidence;
-            responseStatement.in_response_to = inputStatement.text;
+        // Use a threshold for selecting the best match based on combined confidence
+        const confidenceThreshold = 0.4; // Adjust as needed
+        if (bestMatch && bestMatch.response && maxConfidence >= confidenceThreshold) {
+             responseStatement = bestMatch.response;
+             // Set the final confidence on the response statement
+             responseStatement.confidence = maxConfidence;
 
-            // Learn that this responseStatement is a good response for the inputStatement's INTENT.
-            await this.learnResponseToIntent(responseStatement, inputStatement.intent);
+             // --- Learn Response Association ---
+             // Learn that this responseStatement is a good response for the inputStatement's INTENT.
+             await this.learnResponseToIntent(responseStatement, inputStatement.intent);
+             // --- End Response Association Learning ---
+
         } else {
+            // Default response
+            let defaultText = `I'm not sure how to respond to '${inputStatement.text}'.`;
+            if (inputStatement.intent !== 'unknown' && inputStatement.nlp_score > 0.5) {
+                 defaultText = `I understand you're asking about '${inputStatement.intent}', but I don't have a specific answer for '${inputStatement.text}' yet.`;
+            }
             responseStatement = new Statement({
-                text: `I'm not sure how to respond to that (${inputStatement.intent}).`,
-                confidence: 0,
+                text: defaultText,
+                confidence: 0, // Confidence is 0 for default response
                 in_response_to: inputStatement.text,
                 intent: 'default_response'
             });
+            // Do not learn the default response association
         }
 
-        // Update the previous statement
+        // 5. Update previous statement
         this.previous_statement = inputStatement;
 
         return responseStatement;
     }
 
-    /**
-     * Learns the sequence of user inputs.
-     * Stores statement linked to previousStatement's text.
-     */
     async learnInputSequence(statement, previousStatement) {
         if (!statement || !statement.text || !previousStatement || !previousStatement.text) return;
         const sequenceLink = new Statement({
@@ -127,12 +134,6 @@ class ChatBot {
         await this.storage.update(sequenceLink);
     }
 
-    /**
-     * Learns that a given response statement is suitable for a specific intent.
-     * Stores the response statement, setting its intent.
-     * @param {Statement} responseStatement - The statement that was chosen as a response.
-     * @param {string} intent - The intent of the input that triggered this response.
-     */
     async learnResponseToIntent(responseStatement, intent) {
         if (!responseStatement || !responseStatement.text || !intent) return;
 
@@ -145,19 +146,18 @@ class ChatBot {
         await this.storage.update(statementToLearn);
     }
 
-    /**
-     * Learns a user-provided correction.
-     * Associates the correctResponseText with the originalInputText.
-     * @param {string} originalInputText - The user's input that received a wrong answer.
-     * @param {string} correctResponseText - The correct answer provided by the user.
-     */
     async learnCorrection(originalInputText, correctResponseText) {
         let originalInputStatement = new Statement(originalInputText);
         let correctResponseStatement = new Statement(correctResponseText);
 
-        // Preprocess and classify intent of the *original* input
+        // Preprocess original input
         originalInputStatement = this.preprocess(originalInputStatement);
-        originalInputStatement.intent = this.intentClassifier(originalInputStatement);
+        // Classify original input using NLP
+        const nlpResult = await nlpProcessor.process(originalInputStatement.text);
+        originalInputStatement.intent = nlpResult.intent;
+        originalInputStatement.entities = nlpResult.entities;
+        originalInputStatement.nlp_score = nlpResult.score;
+
 
         // Preprocess the correct response
         correctResponseStatement = this.preprocess(correctResponseStatement);
@@ -166,7 +166,8 @@ class ChatBot {
         const correctedStatementToLearn = new Statement({
             text: correctResponseStatement.text,
             in_response_to: originalInputStatement.text,
-            intent: originalInputStatement.intent
+            intent: originalInputStatement.intent, // Associate with the original input's INTENT
+            // Optionally, try to infer intent/entities for the corrected response itself?
         });
 
         console.log(`Learning correction for intent '${correctedStatementToLearn.intent}': "${correctedStatementToLearn.text}" in response to "${originalInputStatement.text}"`);

@@ -9,7 +9,8 @@
     "restart": "(npm run killport -- 3001 || true) && npm run start"
   },
   "dependencies": {
-    "express": "^4.17.1"
+    "express": "^4.17.1",
+    "@nlpjs/basic": "^4.27.0"
   },
   "author": "",
   "license": "ISC"
