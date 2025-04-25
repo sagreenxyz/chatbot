@@ -77,40 +77,36 @@ class JsonFileStorageAdapter extends StorageAdapter {
     }
 
     /**
-     * Filters statements based on query criteria (e.g., in_response_to, case-insensitive).
+     * Filters statements based on query criteria (e.g., in_response_to, intent).
      * Returns an array of serialized data.
      */
     async filter(query) {
         const data = await this._loadData();
-        // Ensure statements is an array before filtering
-        let statementsToFilter = Array.isArray(data?.statements) ? data.statements : [];
+        let filteredStatements = data.statements;
 
-        // Filter by 'in_response_to' (case-insensitive)
+        // Filter by 'in_response_to' (case-insensitive) if provided
         if (query.in_response_to !== undefined && query.in_response_to !== null) {
-            // Ensure query.in_response_to is a string before calling toLowerCase
-            const responseToLower = typeof query.in_response_to === 'string'
-                ? query.in_response_to.toLowerCase()
-                : null;
-
-            if (responseToLower !== null) {
-                statementsToFilter = statementsToFilter.filter(stmtData =>
-                    typeof stmtData?.in_response_to === 'string' && // Check type
-                    stmtData.in_response_to.toLowerCase() === responseToLower
-                );
-            } else {
-                // If query.in_response_to is not a valid string, return empty? Or filter differently?
-                statementsToFilter = [];
-            }
+            const responseToLower = query.in_response_to.toLowerCase();
+            filteredStatements = filteredStatements.filter(stmtData =>
+                stmtData.in_response_to?.toLowerCase() === responseToLower
+            );
         }
 
-        // Add other filter criteria here if needed (e.g., conversation, tags)
+        // Filter by 'intent' if provided
+        if (query.intent !== undefined && query.intent !== null) {
+            filteredStatements = filteredStatements.filter(stmtData =>
+                stmtData.intent === query.intent
+            );
+        }
 
-        return statementsToFilter; // Return array of serialized data
+        // Add other filter criteria here if needed
+
+        return filteredStatements; // Return array of serialized data
     }
 
     /**
      * Updates or creates a statement. Expects a Statement object as input.
-     * Stores serialized data. Returns serialized data.
+     * Stores serialized data including intent. Returns serialized data.
      */
     async update(statement) {
         if (!(statement instanceof Statement)) {
@@ -123,7 +119,7 @@ class JsonFileStorageAdapter extends StorageAdapter {
             dbData.statements = []; // Attempt recovery
         }
 
-        const statementData = statement.serialize(); // Get serializable data
+        const statementData = statement.serialize(); // Get serializable data (includes intent now)
 
         // Find existing based on text (case-insensitive)
         const textToCompare = typeof statementData.text === 'string' ? statementData.text.toLowerCase() : null;
@@ -144,10 +140,10 @@ class JsonFileStorageAdapter extends StorageAdapter {
                 return null; // Indicate failure or skip?
             }
         } else {
-            // Update existing statement data (simple merge for now)
+            // Update existing statement data, ensuring intent is updated
             dbData.statements[existingIndex] = {
                 ...dbData.statements[existingIndex], // Keep existing data
-                ...statementData // Overwrite with new data (like in_response_to, timestamp)
+                ...statementData // Overwrite with new data (including intent and in_response_to)
             };
         }
 

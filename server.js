@@ -3,6 +3,7 @@ const ChatBot = require('./chatbot');
 const Statement = require('./statement'); // Import Statement
 const JsonFileStorageAdapter = require('./adapters/json_file_storage_adapter');
 const BestMatchLogicAdapter = require('./adapters/best_match_logic_adapter');
+const TimeLogicAdapter = require('./adapters/time_logic_adapter'); // Import the new adapter
 const preprocessors = require('./preprocessors'); // Import preprocessors
 
 const app = express();
@@ -16,6 +17,8 @@ app.use(express.json());
 const bot = new ChatBot('NodeBot', {
     storageAdapter: new JsonFileStorageAdapter({ databasePath: './db.json' }),
     logicAdapters: [
+        // Add TimeLogicAdapter first so it's checked before BestMatch
+        new TimeLogicAdapter(),
         new BestMatchLogicAdapter()
         // Add more logic adapters here
     ],

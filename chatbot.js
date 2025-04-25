@@ -1,5 +1,6 @@
 const Statement = require('./statement'); // Import Statement class
 const preprocessors = require('./preprocessors'); // Import preprocessors
+const { classifyIntent, DEFAULT_INTENT } = require('./intent_classifier'); // Import classifier
 
 // Default adapter imports (assuming they exist and are updated)
 const JsonFileStorageAdapter = require('./adapters/json_file_storage_adapter');
@@ -21,6 +22,9 @@ class ChatBot {
 
         // Store the previous statement received (now as a Statement object)
         this.previous_statement = null;
+
+        // Add intent classifier (could be made configurable like adapters)
+        this.intentClassifier = options.intentClassifier || classifyIntent;
     }
 
     /**
@@ -53,15 +57,13 @@ class ChatBot {
         // Preprocess the input statement
         inputStatement = this.preprocess(inputStatement);
 
-        // If preprocessing results in empty text, return early? Or let logic adapters handle?
-        if (!inputStatement.text) {
-             console.warn("Input statement text is empty after preprocessing.");
-             // Return a specific response or the default 'don't understand'
-             return new Statement({
-                text: "Please provide some input.",
-                confidence: 0,
-                in_response_to: null
-             });
+        // Classify Intent
+        inputStatement.intent = this.intentClassifier(inputStatement);
+        console.log(`Detected intent: ${inputStatement.intent}`); // Logging
+
+        // Learn that the *current input* might follow the *previous input*.
+        if (this.previous_statement) {
+            await this.learnInputSequence(inputStatement, this.previous_statement);
         }
 
         let bestMatch = null;
@@ -73,15 +75,13 @@ class ChatBot {
             if (adapter.canProcess(inputStatement)) {
                 try {
                     const result = await adapter.process(inputStatement, this.storage);
-                    // Result should contain a response Statement and confidence
-                    // Ensure result and result.response are valid
                     if (result && result.response instanceof Statement && typeof result.confidence === 'number') {
                         if (result.confidence > maxConfidence) {
                             maxConfidence = result.confidence;
-                            bestMatch = result; // result = { response: Statement, confidence: number }
+                            bestMatch = result;
                         }
                     } else {
-                         console.warn(`Logic adapter ${adapter.constructor.name} returned invalid result for input:`, inputStatement.text, "Result:", result);
+                        console.warn(`Logic adapter ${adapter.constructor.name} returned invalid result for input:`, inputStatement.text, "Result:", result);
                     }
                 } catch (error) {
                     console.error(`Error processing with logic adapter ${adapter.constructor.name}:`, error);
@@ -89,72 +89,60 @@ class ChatBot {
             }
         }
 
-        // Learn that the current statement is a possible response to the previous statement
-        // Only learn if the input wasn't empty and there was a previous statement
-        if (inputStatement.text && this.previous_statement) {
-            // Pass the processed input statement and the previous statement to learnResponse
-            await this.learnResponse(inputStatement, this.previous_statement);
-        }
-
-        // Update the previous statement (store the processed version)
-        // Only update if the input wasn't empty
-        if (inputStatement.text) {
-            this.previous_statement = inputStatement;
-        }
-
         // Select the response or return a default
         let responseStatement;
-        // Use a confidence threshold (e.g., > 0 or a configurable value)
-        if (bestMatch && bestMatch.confidence > 0) {
-             responseStatement = bestMatch.response;
-             // Ensure confidence is set on the response statement itself
-             responseStatement.confidence = bestMatch.confidence;
-             // Link response to the input statement's text
-             responseStatement.in_response_to = inputStatement.text;
+        if (bestMatch && bestMatch.response && maxConfidence > 0) {
+            responseStatement = bestMatch.response;
+            responseStatement.confidence = maxConfidence;
+            responseStatement.in_response_to = inputStatement.text;
 
-             // Learn the association between the input and the bot's *selected* response
-             // This helps reinforce successful response selections
-             await this.learnResponse(responseStatement, inputStatement);
+            // Learn that this responseStatement is a good response for the inputStatement's INTENT.
+            await this.learnResponseToIntent(responseStatement, inputStatement.intent);
         } else {
-            // Return a default Statement object
             responseStatement = new Statement({
-                text: "I'm sorry, I don't understand.",
+                text: `I'm not sure how to respond to that (${inputStatement.intent}).`,
                 confidence: 0,
-                in_response_to: inputStatement.text // Link default response to input
+                in_response_to: inputStatement.text,
+                intent: 'default_response'
             });
-            // Optionally, prevent learning the default response by clearing previous_statement here?
-            // this.previous_statement = null; // If you don't want the next input to be learned as a response to "I don't understand"
         }
+
+        // Update the previous statement
+        this.previous_statement = inputStatement;
 
         return responseStatement;
     }
 
     /**
-     * Learns that statement is a response to previousStatement.
-     * @param {Statement} statement - The statement that was received (already preprocessed).
-     * @param {Statement} previousStatement - The previous statement received (already preprocessed).
+     * Learns the sequence of user inputs.
+     * Stores statement linked to previousStatement's text.
      */
-    async learnResponse(statement, previousStatement) {
-        // Ensure we have valid text to learn
-        if (!statement || !statement.text || !previousStatement || !previousStatement.text) {
-            console.warn("Attempted to learn response with invalid statement data.");
-            return;
-        }
-
-        // Create a Statement object representing the relationship to store
-        // Ensure we are linking the actual text values
-        const statementToLearn = new Statement({
-            text: statement.text, // Store the processed text
-            in_response_to: previousStatement.text // Link to the processed text of the previous input
-            // Add conversation, etc. if needed
+    async learnInputSequence(statement, previousStatement) {
+        if (!statement || !statement.text || !previousStatement || !previousStatement.text) return;
+        const sequenceLink = new Statement({
+            text: statement.text,
+            in_response_to: previousStatement.text,
+            intent: statement.intent
         });
+        await this.storage.update(sequenceLink);
+    }
 
-        // Storage adapter handles Statement objects or their serialized form
-        try {
-            await this.storage.update(statementToLearn);
-        } catch (error) {
-             console.error("Error during storage update in learnResponse:", error);
-        }
+    /**
+     * Learns that a given response statement is suitable for a specific intent.
+     * Stores the response statement, setting its intent.
+     * @param {Statement} responseStatement - The statement that was chosen as a response.
+     * @param {string} intent - The intent of the input that triggered this response.
+     */
+    async learnResponseToIntent(responseStatement, intent) {
+        if (!responseStatement || !responseStatement.text || !intent) return;
+
+        const statementToLearn = new Statement({
+            text: responseStatement.text,
+            in_response_to: responseStatement.in_response_to,
+            intent: intent
+        });
+        console.log(`Learning response for intent '${intent}': "${statementToLearn.text}"`);
+        await this.storage.update(statementToLearn);
     }
 
     /**
@@ -164,33 +152,26 @@ class ChatBot {
      * @param {string} correctResponseText - The correct answer provided by the user.
      */
     async learnCorrection(originalInputText, correctResponseText) {
-        // Create Statement objects for processing
         let originalInputStatement = new Statement(originalInputText);
         let correctResponseStatement = new Statement(correctResponseText);
 
-        // Preprocess both
+        // Preprocess and classify intent of the *original* input
         originalInputStatement = this.preprocess(originalInputStatement);
+        originalInputStatement.intent = this.intentClassifier(originalInputStatement);
+
+        // Preprocess the correct response
         correctResponseStatement = this.preprocess(correctResponseStatement);
 
         // Create the statement representing the correct association
         const correctedStatementToLearn = new Statement({
-            text: correctResponseStatement.text, // The correct response text
-            in_response_to: originalInputStatement.text // Linked to the original input text
+            text: correctResponseStatement.text,
+            in_response_to: originalInputStatement.text,
+            intent: originalInputStatement.intent
         });
 
-        // Use the storage adapter's update method.
-        // The update method should handle overwriting/updating the 'in_response_to'
-        // field if a statement with the same 'text' already exists.
-        console.log(`Learning correction: "${correctedStatementToLearn.text}" in response to "${correctedStatementToLearn.in_response_to}"`);
+        console.log(`Learning correction for intent '${correctedStatementToLearn.intent}': "${correctedStatementToLearn.text}" in response to "${originalInputStatement.text}"`);
         await this.storage.update(correctedStatementToLearn);
-
-        // Optional: Consider logic to find and potentially remove or down-weight
-        // the statement representing the *incorrect* response association,
-        // but simply overwriting the correct one via update() is often sufficient.
     }
 }
-
-// --- Adapter Placeholders (Ensure these files are updated accordingly) ---
-// Placeholder classes removed assuming actual files exist and are updated
 
 module.exports = ChatBot;

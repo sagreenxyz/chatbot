@@ -5,9 +5,11 @@ A simple, customizable web-based AI chatbot built with Node.js, inspired by the 
 ## Features
 
 *   **Modular Design:** Easily swap components like storage and logic adapters.
-*   **Learning:** Learns responses based on conversation flow and user corrections.
+*   **Intent-Based Understanding:** Attempts to classify user input intent (e.g., greeting, goodbye, ask_time) for more robust responses.
+*   **Specific Logic:** Handles specific intents like asking the time with dedicated logic adapters.
+*   **Learning:** Learns responses associated with intents, conversation flow, and user corrections.
 *   **Preprocessors:** Includes basic text preprocessing (lowercase, whitespace cleaning).
-*   **Simple Storage:** Uses a JSON file for storing conversation data (`db.json`).
+*   **Simple Storage:** Uses a JSON file for storing conversation data (`db.json`), including intents.
 *   **Web Interface:** Basic HTML interface for interaction, including response correction.
 *   **API Endpoints:** `/chat` for getting responses, `/correct` for submitting corrections.
 
@@ -45,7 +47,7 @@ A simple, customizable web-based AI chatbot built with Node.js, inspired by the 
 
 1.  Run the chatbot using `npm start` or `npm run restart`.
 2.  Open your web browser to `http://localhost:3001` (or the configured port).
-3.  Interact with the bot through the input field.
+3.  Interact with the bot. Try asking "What time is it?".
 4.  **Correcting Responses:** If the bot gives an unsatisfactory answer, click the "Correct This Response" button that appears next to it. Enter the response you think the bot *should* have given and click "Submit Correction". The bot will learn this new association for future interactions.
 
 ## API Interaction
@@ -86,19 +88,34 @@ A simple, customizable web-based AI chatbot built with Node.js, inspired by the 
 ## Architecture Overview
 
 *   **`server.js`**: Entry point, sets up Express server and API endpoints.
-*   **`chatbot.js`**: Core `ChatBot` class orchestrating adapters and learning.
-*   **`statement.js`**: `Statement` class representing conversational entries.
+*   **`chatbot.js`**: Core `ChatBot` class orchestrating adapters, intent classification, and learning.
+*   **`statement.js`**: `Statement` class representing conversational entries (now includes `intent`).
 *   **`preprocessors.js`**: Functions to clean/modify input text.
+*   **`intent_classifier.js`**: Simple keyword-based component to determine user input intent.
 *   **`adapters/`**: Contains base classes and implementations for:
-    *   **`storage_adapter.js`**: Interface for storing/retrieving statements.
+    *   **`storage_adapter.js`**: Interface for storing/retrieving statements (handles `intent`).
         *   `json_file_storage_adapter.js`: Stores data in `db.json`.
     *   **`logic_adapter.js`**: Interface for selecting responses.
-        *   `best_match_logic_adapter.js`: Finds responses based on previous interactions.
+        *   `time_logic_adapter.js`: Specifically handles requests for the current time.
+        *   `best_match_logic_adapter.js`: Finds responses primarily based on matching the detected intent (fallback).
 *   **`db.json`**: Default database file (created automatically).
 
 ## Customization
 
-*   **Logic:** Create new classes inheriting from `LogicAdapter` and add them to the `logicAdapters` array in `server.js`.
+*   **Intents:** Modify `intent_classifier.js` to add/change intents and keywords, or replace it with a more sophisticated classifier (e.g., using NLP libraries). Configure a custom classifier via `ChatBot` options in `server.js`.
+*   **Logic:** Create new classes inheriting from `LogicAdapter` (potentially using intent information) and add them to the `logicAdapters` array in `server.js`.
 *   **Storage:** Create new classes inheriting from `StorageAdapter` and set it as the `storageAdapter` in `server.js`.
 *   **Preprocessors:** Add new functions to `preprocessors.js` and include them in the `preprocessors` array in `server.js`.
-*   **Response Selection:** Modify or add methods in `BestMatchLogicAdapter` (or your custom logic adapter) to change how responses are chosen when multiple matches exist.
+*   **Response Selection:** Modify or add methods in `BestMatchLogicAdapter` (or your custom logic adapter) to change how responses are chosen when multiple responses exist for an intent.
+
+## Future Improvements
+
+*   **Advanced NLP:** Integrate more sophisticated NLP libraries (e.g., Natural, Nlp.js) for better intent classification, entity recognition, and sentiment analysis.
+*   **Context Management:** Implement a more robust way to track conversation context across multiple turns.
+*   **More Logic Adapters:** Add adapters for specific tasks like calculations, weather lookups, or integrating with external APIs.
+*   **Database Storage:** Create storage adapters for databases like MongoDB, PostgreSQL, or Redis for better scalability and performance.
+*   **Confidence Scoring:** Implement more nuanced confidence calculation in logic adapters based on match quality, context, etc.
+*   **Testing:** Add unit and integration tests for adapters, preprocessors, and the core chatbot logic.
+*   **User Authentication/Profiles:** Allow different users to have separate conversation histories.
+*   **Deployment:** Add instructions and configurations for deploying to platforms like Heroku, AWS, or Docker.
+*   **Training Interface:** Build a separate interface or process for training the bot with predefined conversation corpora.

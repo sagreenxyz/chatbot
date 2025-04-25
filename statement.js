@@ -3,6 +3,7 @@ class Statement {
         // config can be a string or an object
         if (typeof config === 'string') {
             this.text = config;
+            this.intent = null; // Initialize intent
             // Initialize defaults for other properties when created from string
             this.in_response_to = null;
             this.conversation = 'default';
@@ -15,8 +16,8 @@ class Statement {
             this.conversation = config.conversation || 'default'; // Conversation thread identifier
             this.confidence = config.confidence || 0;
             this.storage_data = config.storage_data || {}; // Extra data for storage adapter
-            // Add other relevant fields like timestamp, tags, etc.
             this.timestamp = config.timestamp || Date.now();
+            this.intent = config.intent || null; // Add intent property
         } else {
              throw new Error("Invalid Statement configuration");
         }
@@ -29,6 +30,7 @@ class Statement {
             in_response_to: this.in_response_to,
             conversation: this.conversation,
             timestamp: this.timestamp,
+            intent: this.intent // Include intent in serialized data
             // Note: Confidence is usually calculated, not stored directly this way
             // storage_data could be merged here if needed
         };
