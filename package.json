@@ -1,0 +1,16 @@
+{
+  "name": "nodejs-chatbot",
+  "version": "1.0.0",
+  "description": "A customizable Node.js chatbot",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "killport": "sh -c 'sudo kill -9 $(sudo lsof -t -i :$1)' --",
+    "restart": "(npm run killport -- 3001 || true) && npm run start"
+  },
+  "dependencies": {
+    "express": "^4.17.1"
+  },
+  "author": "",
+  "license": "ISC"
+}
